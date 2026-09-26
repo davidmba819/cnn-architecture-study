@@ -1,0 +1,9 @@
+data/
+*.zip
+*.tar
+*.tar.gz
+*.pth
+*.pt
+__pycache__/
+.ipynb_checkpoints/
+CNN_Project_Setup.ipynb
