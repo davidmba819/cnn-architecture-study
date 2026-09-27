@@ -427,3 +427,216 @@ def load_model(model, path, device):
     print(f"Model loaded from: {path}")
 
     return model
+from datasets import load_from_disk
+
+def load_dataset(data_path):
+    """
+    Load the Stanford Cars dataset from disk.
+
+    Parameters
+    ----------
+    data_path : str
+        Path to the saved dataset.
+
+    Returns
+    -------
+    DatasetDict
+        Loaded Stanford Cars dataset.
+    """
+    dataset = load_from_disk(data_path)
+
+    print("Dataset loaded successfully.")
+    print(dataset)
+
+    return dataset
+def create_dataloaders(
+    train_dataset,
+    val_dataset,
+    test_dataset,
+    train_transform,
+    eval_transform,
+    batch_size=64,
+    num_workers=2
+):
+
+    """
+    Apply transformations and create PyTorch DataLoaders.
+
+    Parameters
+    ----------
+    train_dataset : Dataset
+        Training dataset.
+
+    val_dataset : Dataset
+        Validation dataset.
+
+    test_dataset : Dataset
+        Test dataset.
+
+    train_transform : torchvision.transforms.Compose
+        Transformations applied to training images.
+
+    eval_transform : torchvision.transforms.Compose
+        Transformations applied to validation and test images.
+
+    batch_size : int
+        Number of images processed in each batch.
+
+    num_workers : int
+        Number of worker processes used by DataLoader.
+
+    Returns
+    -------
+    train_loader
+    val_loader
+    test_loader
+    """
+
+    class TransformedDataset(Dataset):
+        def __init__(self, dataset, transform=None):
+            self.dataset = dataset
+            self.transform = transform
+
+        def __len__(self):
+            return len(self.dataset)
+
+        def __getitem__(self, index):
+            item = self.dataset[index]
+            image = item["image"]
+            label = item["label"]
+
+            if self.transform:
+                image = self.transform(image)
+
+            return image, label
+
+    train_dataset = TransformedDataset(
+        train_dataset,
+        transform=train_transform
+    )
+
+    val_dataset = TransformedDataset(
+        val_dataset,
+        transform=eval_transform
+    )
+
+    test_dataset = TransformedDataset(
+        test_dataset,
+        transform=eval_transform
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers
+    )
+
+    return train_loader, val_loader, test_loader
+def train_model(model, train_loader, val_loader, loss_fn, optimizer, device, epochs):
+
+  """
+    Train a model and evaluate it on the validation set
+    after every epoch.
+
+    Returns
+    -------
+    model : trained model
+    history : dictionary containing loss and accuracy
+    """
+
+  history = {
+      "train_loss": [],
+      "train_acc": [],
+      "val_loss": [],
+      "val_acc": []
+  }
+
+  model.to(device)
+
+  for epoch in range(epochs):
+
+    model.train()
+
+    train_loss = 0.0
+    train_correct = 0.0
+    train_total = 0.0
+
+    for images, labels in train_loader:
+
+      images = images.to(device)
+      labels = labels.to(device)
+
+      optimizer.zero_grad()
+
+      outputs = model(images)
+
+      loss = loss_fn(outputs, labels)
+      loss.backward()
+      optimizer.step()
+
+      train_loss += loss.item() * images.size(0)
+
+      prediction = torch.argmax(outputs, dim=1)
+
+      train_correct += (prediction == labels).sum().item()
+      train_total += labels.size(0)
+
+    train_loss = train_loss / train_total
+    train_acc = train_correct / train_total
+
+    # ----------------------------------------------------
+    # Validation
+    # ----------------------------------------------------
+
+    model.eval()
+
+    val_loss = 0.0
+    val_correct = 0.0
+    val_total = 0
+
+    with torch.no_grad():
+
+      for images, labels in val_loader:
+
+        images = images.to(device)
+        labels = labels.to(device)
+
+        output = model(images)
+
+        loss = loss_fn(output, labels)
+
+        val_loss += loss.item() * images.size(0)
+
+        prediction = torch.argmax(output, dim=1)
+
+        val_correct += (prediction == labels).sum().item()
+        val_total += labels.size(0)
+
+    val_loss = val_loss / val_total
+    val_acc = val_correct / val_total
+
+    history["train_loss"].append(train_loss)
+    history["train_acc"].append(train_acc)
+    history["val_loss"].append(val_loss)
+    history["val_acc"].append(val_acc)
+
+    print(f"Epoch {epoch+1}/{epochs}")
+    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
+    print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
+
+  return model, history
