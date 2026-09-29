@@ -745,3 +745,217 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, device, epo
     print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
 
   return model, history
+
+def create_transforms():
+    train_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.4914, 0.4822, 0.4465],
+            std=[0.2470, 0.2435, 0.2616]
+        )
+    ])
+
+    eval_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.4914, 0.4822, 0.4465],
+            std=[0.2470, 0.2435, 0.2616]
+        )
+    ])
+
+    return train_transform, eval_transform
+
+from torch.utils.data import random_split
+
+def prepare_datasets(train_dataset, val_ratio=0.2, seed=42):
+    """
+    Split the training dataset into training and validation sets
+    while keeping the original test dataset separate.
+
+    Parameters
+    ----------
+    train_dataset : Dataset
+        Original training dataset.
+
+    test_dataset : Dataset
+        Original test dataset.
+
+    val_ratio : float
+        Proportion of the training dataset used for validation.
+
+    seed : int
+        Random seed used for reproducible splitting.
+
+    Returns
+    -------
+    train_data : Dataset
+        Training subset.
+
+    val_data : Dataset
+        Validation subset.
+
+    test_data : Dataset
+        Original test dataset.
+    """
+
+    train_size = int((1 - val_ratio) * len(train_dataset))
+    val_size = len(train_dataset) - train_size
+
+    generator = torch.Generator().manual_seed(seed)
+
+    train_data, val_data = random_split(
+        train_dataset,
+        [train_size, val_size],
+        generator=generator
+    )
+
+    test_data = test_dataset
+
+    return train_data, val_data
+
+from torch.utils.data import random_split
+
+def prepare_datasets(train_dataset, val_ratio=0.2, seed=42):
+    """
+    Split the training dataset into training and validation sets
+    while keeping the original test dataset separate.
+
+    Parameters
+    ----------
+    train_dataset : Dataset
+        Original training dataset.
+
+    test_dataset : Dataset
+        Original test dataset.
+
+    val_ratio : float
+        Proportion of the training dataset used for validation.
+
+    seed : int
+        Random seed used for reproducible splitting.
+
+    Returns
+    -------
+    train_data : Dataset
+        Training subset.
+
+    val_data : Dataset
+        Validation subset.
+
+    test_data : Dataset
+        Original test dataset.
+    """
+
+    train_size = int((1 - val_ratio) * len(train_dataset))
+    val_size = len(train_dataset) - train_size
+
+    generator = torch.Generator().manual_seed(seed)
+
+    train_data, val_data = random_split(
+        train_dataset,
+        [train_size, val_size],
+        generator=generator
+    )
+
+  
+
+    return train_data, val_data
+
+from torch.utils.data import Dataset, DataLoader, random_split
+
+def create_dataloaders(
+    train_dataset,
+    val_dataset,
+    test_dataset,
+    train_transform,
+    eval_transform,
+    batch_size=64,
+    num_workers=2
+):
+    """
+    Apply transformations and create PyTorch DataLoaders.
+
+    Parameters
+    ----------
+    train_dataset : Dataset
+        Training dataset.
+
+    val_dataset : Dataset
+        Validation dataset.
+
+    test_dataset : Dataset
+        Test dataset.
+
+    train_transform : torchvision.transforms.Compose
+        Transformations applied to training images.
+
+    eval_transform : torchvision.transforms.Compose
+        Transformations applied to validation and test images.
+
+    batch_size : int
+        Number of images processed in each batch.
+
+    num_workers : int
+        Number of worker processes used by DataLoader.
+
+    Returns
+    -------
+    train_loader
+    val_loader
+    test_loader
+    """
+
+    class TransformedDataset(Dataset):
+        def __init__(self, dataset, transform=None):
+            self.dataset = dataset
+            self.transform = transform
+
+        def __len__(self):
+            return len(self.dataset)
+
+        def __getitem__(self, index):
+            image, label = self.dataset[index]
+
+            if self.transform:
+                image = self.transform(image)
+
+            return image, label
+
+    train_dataset = TransformedDataset(
+        train_dataset,
+        transform=train_transform
+    )
+
+    val_dataset = TransformedDataset(
+        val_dataset,
+        transform=eval_transform
+    )
+
+    test_dataset = TransformedDataset(
+        test_dataset,
+        transform=eval_transform
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers
+    )
+
+    return train_loader, val_loader, test_loader
