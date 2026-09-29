@@ -1,4 +1,3 @@
-
 # ============================================================
 # CNN Architecture Study
 # Reusable utilities for the entire project
@@ -7,331 +6,245 @@
 import random
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
+
+from torchvision import transforms
+from torch.utils.data import Dataset, DataLoader, random_split
+
 
 # ============================================================
 # Reproducibility
 # ============================================================
 
 def set_seed(seed=42):
-  """Set random seeds for reproducible experiments."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
-  random.seed(seed)
-  np.random.seed(seed)
-  torch.manual_seed(seed)
-
-  if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 # ============================================================
 # Data Preparation
 # ============================================================
 
-from torchvision import transforms
-from torch.utils.data import DataLoader, random_split
+def create_transforms():
 
-def create_transforms(image_size=(224,224)):
+    train_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.4914, 0.4822, 0.4465],
+            std=[0.2470, 0.2435, 0.2616]
+        )
+    ])
 
-  """
-    Create image transformations for training and evaluation.
+    eval_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.4914, 0.4822, 0.4465],
+            std=[0.2470, 0.2435, 0.2616]
+        )
+    ])
 
-    Training:
-        - Resize
-        - Random horizontal flip
-        - Convert to tensor
-        - Normalize
+    return train_transform, eval_transform
 
-    Validation/Test:
-        - Resize
-        - Convert to tensor
-        - Normalize
-    """
 
-  train_transform = transforms.Compose([
-      transforms.Resize(image_size),
-      transforms.RandomHorizontalFlip(p=0.5),
-      transforms.ToTensor(),
-      transforms.Normalize(
-          mean=[0.485, 0.456, 0.406],
-          std=[0.229, 0.224, 0.225]
-      )
-  ])
+def prepare_datasets(train_dataset, val_ratio=0.2, seed=42):
 
-  eval_transform = transforms.Compose([
-      transforms.Resize(image_size),
-      transforms.ToTensor(),
-      transforms.Normalize(
-          mean=[0.485, 0.456, 0.406],
-          std=[0.229, 0.224, 0.225]
-      )
-  ])
+    train_size = int((1 - val_ratio) * len(train_dataset))
+    val_size = len(train_dataset) - train_size
 
-  return train_transform, eval_transform
+    generator = torch.Generator().manual_seed(seed)
 
-# ============================================================
-# Dataset Preparation
-# ============================================================
+    train_data, val_data = random_split(
+        train_dataset,
+        [train_size, val_size],
+        generator=generator
+    )
 
-from torch.utils.data import random_split
+    return train_data, val_data
 
-def prepare_datasets(dataset, val_ratio=0.2, seed=42):
-
-  """
-    Split the original training dataset into training and
-    validation sets while keeping the original test set separate.
-
-    Parameters
-    ----------
-    dataset : Hugging Face DatasetDict
-        Stanford Cars dataset containing 'train' and 'test'.
-
-    val_ratio : float
-        Proportion of the original training data used for validation.
-
-    seed : int
-        Random seed used for reproducible splitting.
-
-    Returns
-    -------
-    train_dataset
-    val_dataset
-    test_dataset
-    """
-
-  full_train = dataset["train"]
-  test_dataset = dataset["test"]
-
-  train_size = int(len(full_train) * (1 - val_ratio))
-  val_size = len(full_train) - train_size
-
-  generator = torch.Generator().manual_seed(seed)
-
-  train_dataset, val_dataset = random_split(
-      full_train,
-      [train_size, val_size],
-      generator=generator
-  )
-
-  return train_dataset, val_dataset, test_dataset
 
 # ============================================================
 # DataLoader Creation
 # ============================================================
 
-from torch.utils.data import Dataset, DataLoader
-
-def create_dataloader(
-    train_dataset,
-    val_dataset,
-    test_dataset,
+def create_dataloaders(
+    train_data,
+    val_data,
+    test_data,
+    train_transform,
+    eval_transform,
     batch_size=64,
     num_workers=2
 ):
 
-  """
-    Apply transformations and create PyTorch DataLoaders.
+    class TransformedDataset(Dataset):
 
-    Parameters
-    ----------
-    train_dataset : Dataset
-        Training dataset.
+        def __init__(self, dataset, transform=None):
+            self.dataset = dataset
+            self.transform = transform
 
-    val_dataset : Dataset
-        Validation dataset.
+        def __len__(self):
+            return len(self.dataset)
 
-    test_dataset : Dataset
-        Test dataset.
+        def __getitem__(self, index):
+            image, label = self.dataset[index]
 
-    train_transform : torchvision.transforms.Compose
-        Transformations applied to training images.
+            if self.transform:
+                image = self.transform(image)
 
-    eval_transform : torchvision.transforms.Compose
-        Transformations applied to validation and test images.
+            return image, label
 
-    batch_size : int
-        Number of images processed in each batch.
+    train_transformed = TransformedDataset(
+        train_data,
+        transform=train_transform
+    )
 
-    num_workers : int
-        Number of worker processes used by DataLoader.
+    val_transformed = TransformedDataset(
+        val_data,
+        transform=eval_transform
+    )
 
-    Returns
-    -------
-    train_loader
-    val_loader
-    test_loader
-    """
+    test_transformed = TransformedDataset(
+        test_data,
+        transform=eval_transform
+    )
 
-  class TransformedDataset(Dataset):
-      def __init__(self, dataset, transform=None):
-          self.dataset = dataset
-          self.transform = transform
+    train_loader = DataLoader(
+        train_transformed,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers
+    )
 
-      def __len__(self):
-        return len(self.dataset)
+    val_loader = DataLoader(
+        val_transformed,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers
+    )
 
+    test_loader = DataLoader(
+        test_transformed,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers
+    )
 
-      def __getitem__(self, index):
+    return train_loader, val_loader, test_loader
 
-        item = self.dataset[index]
-        image = item["image"]
-        label = item["label"]
-
-        if self.transform:
-          image = self.transform(image)
-
-        return image, label
-
-  train_dataset = TransformedDataset(train_dataset, transform=train_transform)
-
-  val_dataset = TransformedDataset(val_dataset, transform=eval_transform)
-
-  test_dataset = TransformedDataset(test_dataset, transform=eval_transform)
-
-  train_loader = DataLoader(
-      train_dataset,
-      batch_size=batch_size,
-      shuffle=True,
-      num_workers=num_workers
-  )
-
-  val_loader = DataLoader(
-      val_dataset,
-      batch_size=batch_size,
-      shuffle=False,
-      num_workers=num_workers
-  )
-
-  test_loader = DataLoader(
-      test_dataset,
-      batch_size=batch_size,
-      shuffle=False,
-      num_workers=num_workers
-  )
-
-  return train_loader, val_loader, test_loader
-  
 
 # ============================================================
 # Model Training
 # ============================================================
 
-def train_model(model, train_loader, val_loader, loss_fn, optimizer, device, epochs):
+def train_model(
+    model,
+    train_loader,
+    val_loader,
+    loss_function,
+    optimizer,
+    device,
+    epochs
+):
 
-  """
-    Train a model and evaluate it on the validation set
-    after every epoch.
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "train_acc": [],
+        "val_acc": []
+    }
 
-    Returns
-    -------
-    model : trained model
-    history : dictionary containing loss and accuracy
-    """
+    model.to(device)
 
-  history = {
-      "train_loss": [],
-      "train_acc": [],
-      "val_loss": [],
-      "val_acc": []
-  }
+    for epoch in range(epochs):
 
-  model.to(device)
+        # Training
+        model.train()
 
-  for epoch in range(epochs):
+        running_loss = 0.0
+        correct = 0
+        total = 0
 
-    model.train()
+        for images, labels in train_loader:
 
-    train_loss = 0.0
-    train_correct = 0.0
-    train_total = 0.0
+            images = images.to(device)
+            labels = labels.to(device)
 
-    for images, labels in train_loader:
+            optimizer.zero_grad()
 
-      images = images.to(device)
-      labels = labels.to(device)
+            outputs = model(images)
 
-      optimizer.zero_grad()
+            loss = loss_function(outputs, labels)
 
-      outputs = model(images)
+            loss.backward()
+            optimizer.step()
 
-      loss = loss_fn(outputs, labels)
-      loss.backward()
-      optimizer.step()
+            running_loss += loss.item() * images.size(0)
 
-      running_loss += loss.item() * images.size(0)
+            predicted = torch.argmax(outputs, dim=1)
 
-      prediction = torch.argmax(outputs, dim=1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
 
-      train_correct += (prediction == labels).sum().item()
-      train_total += labels.size(0)
+        train_loss = running_loss / total
+        train_acc = correct / total
 
-    train_loss = running_loss / train_total
-    train_acc = train_correct / train_total
+        # Validation
+        model.eval()
 
-    # ----------------------------------------------------
-    # Validation
-    # ----------------------------------------------------
+        val_running_loss = 0.0
+        val_correct = 0
+        val_total = 0
 
-    model.eval()
+        with torch.no_grad():
 
-    val_loss = 0.0
-    val_correct = 0.0
-    val_total = 0
+            for images, labels in val_loader:
 
-    with torch.no_grad():
+                images = images.to(device)
+                labels = labels.to(device)
 
-      for images, labels in val_loader:
+                outputs = model(images)
 
-        images = images.to(device)
-        labels = labels.to(device)
+                loss = loss_function(outputs, labels)
 
-        output = model(images)
+                val_running_loss += loss.item() * images.size(0)
 
-        loss = loss_fn(output, labels)
+                predicted = torch.argmax(outputs, dim=1)
 
-        val_loss += loss.item() * images.size(0)
+                val_correct += (predicted == labels).sum().item()
+                val_total += labels.size(0)
 
-        prediction = torch.argmax(output, dim=1)
+        val_loss = val_running_loss / val_total
+        val_acc = val_correct / val_total
 
-        val_correct += (prediction == labels).sum().item()
-        val_total += labels.size(0)
+        history["train_loss"].append(train_loss)
+        history["val_loss"].append(val_loss)
+        history["train_acc"].append(train_acc)
+        history["val_acc"].append(val_acc)
 
-    val_loss = val_loss / val_total
-    val_acc = val_correct / val_total
+        print(
+            f"Epoch [{epoch + 1}/{epochs}] "
+            f"Train Loss: {train_loss:.4f} | "
+            f"Train Acc: {train_acc:.4f} | "
+            f"Val Loss: {val_loss:.4f} | "
+            f"Val Acc: {val_acc:.4f}"
+        )
 
-    history["train_loss"].append(train_loss)
-    history["train_acc"].append(train_acc)
-    history["val_loss"].append(val_loss)
-    history["val_acc"].append(val_acc)
+    return model, history
 
-    print(f"Epoch {epoch+1}/{epochs}")
-    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-    print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
-
-  return model, history
 
 # ============================================================
-# Training History Visualization
+# Training History
 # ============================================================
-
-import matplotlib.pyplot as plt
-
 
 def plot_history(history):
-    """
-    Plot training and validation loss and accuracy.
-
-    Parameters
-    ----------
-    history : dict
-        History dictionary returned by train_model().
-    """
 
     epochs = range(1, len(history["train_loss"]) + 1)
-
-    # --------------------------------------------------------
-    # Loss
-    # --------------------------------------------------------
 
     plt.figure(figsize=(8, 5))
 
@@ -354,10 +267,6 @@ def plot_history(history):
     plt.grid(True)
     plt.show()
 
-    # --------------------------------------------------------
-    # Accuracy
-    # --------------------------------------------------------
-
     plt.figure(figsize=(8, 5))
 
     plt.plot(
@@ -379,12 +288,18 @@ def plot_history(history):
     plt.grid(True)
     plt.show()
 
+
+# ============================================================
+# Model Evaluation
+# ============================================================
+
 def test_model(
     model,
     test_loader,
     loss_function,
     device
 ):
+
     model.to(device)
     model.eval()
 
@@ -393,19 +308,22 @@ def test_model(
     test_total = 0
 
     with torch.no_grad():
+
         for images, labels in test_loader:
+
             images = images.to(device)
             labels = labels.to(device)
 
             outputs = model(images)
+
             loss = loss_function(outputs, labels)
 
             test_running_loss += loss.item() * images.size(0)
 
             predicted = torch.argmax(outputs, dim=1)
 
-            test_total += labels.size(0)
             test_correct += (predicted == labels).sum().item()
+            test_total += labels.size(0)
 
     test_loss = test_running_loss / test_total
     test_acc = test_correct / test_total
@@ -415,547 +333,29 @@ def test_model(
 
     return test_loss, test_acc
 
+
+# ============================================================
+# Model Saving and Loading
+# ============================================
+
+
 def save_model(model, path):
+
     torch.save(model.state_dict(), path)
+
     print(f"Model saved to: {path}")
 
+
 def load_model(model, path, device):
-    model.load_state_dict(torch.load(path, map_location=device))
+
+    model.load_state_dict(
+        torch.load(path, map_location=device)
+    )
+
     model.to(device)
     model.eval()
 
     print(f"Model loaded from: {path}")
 
     return model
-from datasets import load_from_disk
 
-def load_dataset(data_path):
-    """
-    Load the Stanford Cars dataset from disk.
-
-    Parameters
-    ----------
-    data_path : str
-        Path to the saved dataset.
-
-    Returns
-    -------
-    DatasetDict
-        Loaded Stanford Cars dataset.
-    """
-    dataset = load_from_disk(data_path)
-
-    print("Dataset loaded successfully.")
-    print(dataset)
-
-    return dataset
-def create_dataloaders(
-    train_dataset,
-    val_dataset,
-    test_dataset,
-    train_transform,
-    eval_transform,
-    batch_size=64,
-    num_workers=2
-):
-
-    """
-    Apply transformations and create PyTorch DataLoaders.
-
-    Parameters
-    ----------
-    train_dataset : Dataset
-        Training dataset.
-
-    val_dataset : Dataset
-        Validation dataset.
-
-    test_dataset : Dataset
-        Test dataset.
-
-    train_transform : torchvision.transforms.Compose
-        Transformations applied to training images.
-
-    eval_transform : torchvision.transforms.Compose
-        Transformations applied to validation and test images.
-
-    batch_size : int
-        Number of images processed in each batch.
-
-    num_workers : int
-        Number of worker processes used by DataLoader.
-
-    Returns
-    -------
-    train_loader
-    val_loader
-    test_loader
-    """
-
-    class TransformedDataset(Dataset):
-        def __init__(self, dataset, transform=None):
-            self.dataset = dataset
-            self.transform = transform
-
-        def __len__(self):
-            return len(self.dataset)
-
-        def __getitem__(self, index):
-            item = self.dataset[index]
-            image = item["image"]
-            label = item["label"]
-
-            if self.transform:
-                image = self.transform(image)
-
-            return image, label
-
-    train_dataset = TransformedDataset(
-        train_dataset,
-        transform=train_transform
-    )
-
-    val_dataset = TransformedDataset(
-        val_dataset,
-        transform=eval_transform
-    )
-
-    test_dataset = TransformedDataset(
-        test_dataset,
-        transform=eval_transform
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers
-    )
-
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers
-    )
-
-    return train_loader, val_loader, test_loader
-def train_model(model, train_loader, val_loader, loss_fn, optimizer, device, epochs):
-
-  """
-    Train a model and evaluate it on the validation set
-    after every epoch.
-
-    Returns
-    -------
-    model : trained model
-    history : dictionary containing loss and accuracy
-    """
-
-  history = {
-      "train_loss": [],
-      "train_acc": [],
-      "val_loss": [],
-      "val_acc": []
-  }
-
-  model.to(device)
-
-  for epoch in range(epochs):
-
-    model.train()
-
-    train_loss = 0.0
-    train_correct = 0.0
-    train_total = 0.0
-
-    for images, labels in train_loader:
-
-      images = images.to(device)
-      labels = labels.to(device)
-
-      optimizer.zero_grad()
-
-      outputs = model(images)
-
-      loss = loss_fn(outputs, labels)
-      loss.backward()
-      optimizer.step()
-
-      train_loss += loss.item() * images.size(0)
-
-      prediction = torch.argmax(outputs, dim=1)
-
-      train_correct += (prediction == labels).sum().item()
-      train_total += labels.size(0)
-
-    train_loss = train_loss / train_total
-    train_acc = train_correct / train_total
-
-    # ----------------------------------------------------
-    # Validation
-    # ----------------------------------------------------
-
-    model.eval()
-
-    val_loss = 0.0
-    val_correct = 0.0
-    val_total = 0
-
-    with torch.no_grad():
-
-      for images, labels in val_loader:
-
-        images = images.to(device)
-        labels = labels.to(device)
-
-        output = model(images)
-
-        loss = loss_fn(output, labels)
-
-        val_loss += loss.item() * images.size(0)
-
-        prediction = torch.argmax(output, dim=1)
-
-        val_correct += (prediction == labels).sum().item()
-        val_total += labels.size(0)
-
-    val_loss = val_loss / val_total
-    val_acc = val_correct / val_total
-
-    history["train_loss"].append(train_loss)
-    history["train_acc"].append(train_acc)
-    history["val_loss"].append(val_loss)
-    history["val_acc"].append(val_acc)
-
-    print(f"Epoch {epoch+1}/{epochs}")
-    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-    print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
-
-  return model, history
-
-def train_model(model, train_loader, val_loader, loss_fn, optimizer, device, epochs):
-
-  """
-    Train a model and evaluate it on the validation set
-    after every epoch.
-
-    Returns
-    -------
-    model : trained model
-    history : dictionary containing loss and accuracy
-    """
-
-  history = {
-      "train_loss": [],
-      "train_acc": [],
-      "val_loss": [],
-      "val_acc": []
-  }
-
-  model.to(device)
-
-  for epoch in range(epochs):
-
-    # ----------------------------------------------------
-    # Training
-    # ----------------------------------------------------
-
-    model.train()
-
-    train_loss = 0.0
-    train_correct = 0
-    train_total = 0
-
-    for images, labels in train_loader:
-
-      images = images.to(device)
-      labels = labels.to(device)
-
-      optimizer.zero_grad()
-
-      outputs = model(images)
-
-      loss = loss_fn(outputs, labels)
-
-      loss.backward()
-
-      optimizer.step()
-
-      train_loss += loss.item() * images.size(0)
-
-      prediction = torch.argmax(outputs, dim=1)
-
-      train_correct += (prediction == labels).sum().item()
-      train_total += labels.size(0)
-
-    train_loss = train_loss / train_total
-    train_acc = train_correct / train_total
-
-    # ----------------------------------------------------
-    # Validation
-    # ----------------------------------------------------
-
-    model.eval()
-
-    val_loss = 0.0
-    val_correct = 0
-    val_total = 0
-
-    with torch.no_grad():
-
-      for images, labels in val_loader:
-
-        images = images.to(device)
-        labels = labels.to(device)
-
-        outputs = model(images)
-
-        loss = loss_fn(outputs, labels)
-
-        val_loss += loss.item() * images.size(0)
-
-        prediction = torch.argmax(outputs, dim=1)
-
-        val_correct += (prediction == labels).sum().item()
-        val_total += labels.size(0)
-
-    val_loss = val_loss / val_total
-    val_acc = val_correct / val_total
-
-    # ----------------------------------------------------
-    # Save history
-    # ----------------------------------------------------
-
-    history["train_loss"].append(train_loss)
-    history["train_acc"].append(train_acc)
-
-    history["val_loss"].append(val_loss)
-    history["val_acc"].append(val_acc)
-
-    print(f"Epoch {epoch + 1}/{epochs}")
-    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-    print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
-
-  return model, history
-
-def create_transforms():
-    train_transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.4914, 0.4822, 0.4465],
-            std=[0.2470, 0.2435, 0.2616]
-        )
-    ])
-
-    eval_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.4914, 0.4822, 0.4465],
-            std=[0.2470, 0.2435, 0.2616]
-        )
-    ])
-
-    return train_transform, eval_transform
-
-from torch.utils.data import random_split
-
-def prepare_datasets(train_dataset, val_ratio=0.2, seed=42):
-    """
-    Split the training dataset into training and validation sets
-    while keeping the original test dataset separate.
-
-    Parameters
-    ----------
-    train_dataset : Dataset
-        Original training dataset.
-
-    test_dataset : Dataset
-        Original test dataset.
-
-    val_ratio : float
-        Proportion of the training dataset used for validation.
-
-    seed : int
-        Random seed used for reproducible splitting.
-
-    Returns
-    -------
-    train_data : Dataset
-        Training subset.
-
-    val_data : Dataset
-        Validation subset.
-
-    test_data : Dataset
-        Original test dataset.
-    """
-
-    train_size = int((1 - val_ratio) * len(train_dataset))
-    val_size = len(train_dataset) - train_size
-
-    generator = torch.Generator().manual_seed(seed)
-
-    train_data, val_data = random_split(
-        train_dataset,
-        [train_size, val_size],
-        generator=generator
-    )
-
-    test_data = test_dataset
-
-    return train_data, val_data
-
-from torch.utils.data import random_split
-
-def prepare_datasets(train_dataset, val_ratio=0.2, seed=42):
-    """
-    Split the training dataset into training and validation sets
-    while keeping the original test dataset separate.
-
-    Parameters
-    ----------
-    train_dataset : Dataset
-        Original training dataset.
-
-    test_dataset : Dataset
-        Original test dataset.
-
-    val_ratio : float
-        Proportion of the training dataset used for validation.
-
-    seed : int
-        Random seed used for reproducible splitting.
-
-    Returns
-    -------
-    train_data : Dataset
-        Training subset.
-
-    val_data : Dataset
-        Validation subset.
-
-    test_data : Dataset
-        Original test dataset.
-    """
-
-    train_size = int((1 - val_ratio) * len(train_dataset))
-    val_size = len(train_dataset) - train_size
-
-    generator = torch.Generator().manual_seed(seed)
-
-    train_data, val_data = random_split(
-        train_dataset,
-        [train_size, val_size],
-        generator=generator
-    )
-
-  
-
-    return train_data, val_data
-
-from torch.utils.data import Dataset, DataLoader, random_split
-
-def create_dataloaders(
-    train_dataset,
-    val_dataset,
-    test_dataset,
-    train_transform,
-    eval_transform,
-    batch_size=64,
-    num_workers=2
-):
-    """
-    Apply transformations and create PyTorch DataLoaders.
-
-    Parameters
-    ----------
-    train_dataset : Dataset
-        Training dataset.
-
-    val_dataset : Dataset
-        Validation dataset.
-
-    test_dataset : Dataset
-        Test dataset.
-
-    train_transform : torchvision.transforms.Compose
-        Transformations applied to training images.
-
-    eval_transform : torchvision.transforms.Compose
-        Transformations applied to validation and test images.
-
-    batch_size : int
-        Number of images processed in each batch.
-
-    num_workers : int
-        Number of worker processes used by DataLoader.
-
-    Returns
-    -------
-    train_loader
-    val_loader
-    test_loader
-    """
-
-    class TransformedDataset(Dataset):
-        def __init__(self, dataset, transform=None):
-            self.dataset = dataset
-            self.transform = transform
-
-        def __len__(self):
-            return len(self.dataset)
-
-        def __getitem__(self, index):
-            image, label = self.dataset[index]
-
-            if self.transform:
-                image = self.transform(image)
-
-            return image, label
-
-    train_dataset = TransformedDataset(
-        train_dataset,
-        transform=train_transform
-    )
-
-    val_dataset = TransformedDataset(
-        val_dataset,
-        transform=eval_transform
-    )
-
-    test_dataset = TransformedDataset(
-        test_dataset,
-        transform=eval_transform
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers
-    )
-
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers
-    )
-
-    return train_loader, val_loader, test_loader
